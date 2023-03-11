@@ -1,8 +1,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/wait.h>
 #include <fcntl.h>
+#include <semaphore.h>
 
 int main(int argc, char *argv[]) {
     if (argc != 3) {
@@ -14,8 +14,14 @@ int main(int argc, char *argv[]) {
         printf("Failed to create pipe\n");
         return 0;
     }
+    int fd2[2];
+    if (pipe(fd2) == -1) {
+        printf("Failed to create pipe\n");
+        return 0;
+    }
+    sem_t sem;
+    sem_init(&sem, 0, 1);
     pid_t pid;
-    int status1;
     pid = fork();
     if (pid == 0) {
         int fd_input = open(argv[1], O_RDONLY);
@@ -50,20 +56,37 @@ int main(int argc, char *argv[]) {
             printf("Failed to write string to pipe\n");
             return 0;
         }
+        sem_wait(&sem);
+        close(fd2[1]);
+        char buffer[257];
+        check = read(fd2[0], buffer, sizeof(buffer));
+        if (check < 0) {
+            printf("Failed to read from second pipe\n");
+            return 0;
+        }
+        int fd_output = open(argv[2], O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+        if (fd_output == -1) {
+            printf("Failed to open output file\n");
+            return 0;
+        }
+        char output_buffer[10001];
+        int offset = 0;
+        for (int j = 0; j < 128; ++j) {
+            if (buffer[j] == '1' && buffer[j + 128] == '0') {
+                sprintf(output_buffer + offset++, "%c", j);
+            }
+        }
+        sprintf(output_buffer + offset++, "\n");
+        for (int j = 0; j < 128; ++j) {
+            if (buffer[j] == '0' && buffer[j + 128] == '1') {
+                sprintf(output_buffer + offset++, "%c", j);
+            }
+        }
+        write(fd_output, output_buffer, strlen(output_buffer));
+        close(fd_output);
         return 0;
     } else if (pid == -1) {
         printf("Failed to create first process\n");
-        return 0;
-    }
-    pid_t w_pid = wait(&status1);
-    if (w_pid == -1) {
-        printf("Failed to wait\n");
-        return 0;
-    }
-    int status2;
-    int fd2[2];
-    if (pipe(fd2) == -1) {
-        printf("Failed to create pipe\n");
         return 0;
     }
     pid = fork();
@@ -106,45 +129,7 @@ int main(int argc, char *argv[]) {
             printf("Failed to write string to pipe\n");
             return 0;
         }
-        return 0;
-    }
-    w_pid = wait(&status2);
-    if (w_pid == -1) {
-        printf("Failed to wait\n");
-        return 0;
-    }
-    pid = fork();
-    if (pid == -1) {
-        printf("Failed to create third process\n");
-        return 0;
-    } else if (pid == 0) {
-        close(fd2[1]);
-        char buffer[257];
-        ssize_t check = read(fd2[0], buffer, sizeof (buffer));
-        if (check < 0) {
-            printf("Failed to read from second pipe\n");
-            return 0;
-        }
-        int fd_output = open(argv[2], O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-        if (fd_output == -1) {
-            printf("Failed to open output file\n");
-            return 0;
-        }
-        char output_buffer[10001];
-        int offset = 0;
-        for (int j = 0; j < 128; ++j) {
-            if (buffer[j] == '1' && buffer[j + 128] == '0') {
-                sprintf(output_buffer + offset++, "%c", j);
-            }
-        }
-        sprintf(output_buffer + offset++, "\n");
-        for (int j = 0; j < 128; ++j) {
-            if (buffer[j] == '0' && buffer[j + 128] == '1') {
-                sprintf(output_buffer + offset++, "%c", j);
-            }
-        }
-        write(fd_output, output_buffer, strlen(output_buffer));
-        close(fd_output);
+        sem_post(&sem);
         return 0;
     }
     return 0;

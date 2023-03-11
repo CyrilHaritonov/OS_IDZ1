@@ -1,5 +1,6 @@
 .all: main.c
 	gcc main.c -o main
+	gcc second.c -o second
 	./main tests/input1 tests/output1
 
 .tests: main.c

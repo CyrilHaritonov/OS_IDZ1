@@ -1,21 +1,18 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/wait.h>
 #include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
 
 int main(int argc, char *argv[]) {
     if (argc != 3) {
         printf("Wrong number of arguments\n");
         return 0;
     }
-    int fd[2];
-    if (pipe(fd) == -1) {
-        printf("Failed to create pipe\n");
-        return 0;
-    }
+    mkfifo("fifo_1", 0666);
+    mkfifo("fifo_2", 0666);
     pid_t pid;
-    int status1;
     pid = fork();
     if (pid == 0) {
         int fd_input = open(argv[1], O_RDONLY);
@@ -42,87 +39,21 @@ int main(int argc, char *argv[]) {
             }
         }
         close(fd_input);
-        close(fd[0]);
         char concatenated[10001];
         sprintf(concatenated, "%s\n%s", first_string, second_string);
-        ssize_t check = write(fd[1], concatenated, strlen(concatenated) + 1);
+        int fd_1_write = open("fifo_1", O_WRONLY);
+        ssize_t check = write(fd_1_write, concatenated, strlen(concatenated) + 1);
+        close(fd_1_write);
         if (check < 0) {
-            printf("Failed to write string to pipe\n");
+            printf("Failed to write string to fifo 1\n");
             return 0;
         }
-        return 0;
-    } else if (pid == -1) {
-        printf("Failed to create first process\n");
-        return 0;
-    }
-    pid_t w_pid = wait(&status1);
-    if (w_pid == -1) {
-        printf("Failed to wait\n");
-        return 0;
-    }
-    int status2;
-    int fd2[2];
-    if (pipe(fd2) == -1) {
-        printf("Failed to create pipe\n");
-        return 0;
-    }
-    pid = fork();
-    if (pid == -1) {
-        printf("Failed to create second process\n");
-        return 0;
-    } else if (pid == 0) {
-        close(fd[1]);
-        char buffer[10001];
-        ssize_t check = read(fd[0], buffer, sizeof(buffer));
-        if (check < 0) {
-            printf("Failed to access the pipe from child process\n");
-            return 0;
-        }
-        char first_str_helper[129], second_str_helper[129];
-        for (int i = 0; i < 128; ++i) {
-            first_str_helper[i] = '0';
-            second_str_helper[i] = '0';
-        }
-        int did_find_delimiter = 0;
-        int i = 0;
-        while (!did_find_delimiter || buffer[i] != '\0') {
-            if (buffer[i] == '\n') {
-                did_find_delimiter = 1;
-                i++;
-                continue;
-            }
-            if (did_find_delimiter) {
-                second_str_helper[buffer[i]] = '1';
-            } else {
-                first_str_helper[buffer[i]] = '1';
-            }
-            i++;
-        }
-        close(fd2[0]);
-        char helpers[257];
-        sprintf(helpers, "%s%s", first_str_helper, second_str_helper);
-        check = write(fd2[1], helpers, strlen(helpers) + 1);
-        if (check < 0) {
-            printf("Failed to write string to pipe\n");
-            return 0;
-        }
-        return 0;
-    }
-    w_pid = wait(&status2);
-    if (w_pid == -1) {
-        printf("Failed to wait\n");
-        return 0;
-    }
-    pid = fork();
-    if (pid == -1) {
-        printf("Failed to create third process\n");
-        return 0;
-    } else if (pid == 0) {
-        close(fd2[1]);
         char buffer[257];
-        ssize_t check = read(fd2[0], buffer, sizeof (buffer));
+        int fd_2_read = open("fifo_2", O_RDONLY);
+        check = read(fd_2_read, buffer, sizeof(buffer));
+        close(fd_2_read);
         if (check < 0) {
-            printf("Failed to read from second pipe\n");
+            printf("Failed to read from second fifo\n");
             return 0;
         }
         int fd_output = open(argv[2], O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
@@ -146,6 +77,55 @@ int main(int argc, char *argv[]) {
         write(fd_output, output_buffer, strlen(output_buffer));
         close(fd_output);
         return 0;
+    } else if (pid == -1) {
+        printf("Failed to create first process\n");
+        return 0;
     }
+    pid = fork();
+    if (pid == -1) {
+        printf("Failed to create second process\n");
+        return 0;
+    } else if (pid == 0) {
+        char buffer[10001];
+        int fd_1_read = open("fifo_1", O_RDONLY);
+        ssize_t check = read(fd_1_read, buffer, sizeof(buffer));
+        close(fd_1_read);
+        if (check < 0) {
+            printf("Failed to access the fifo 1 from child process\n");
+            return 0;
+        }
+        char first_str_helper[129], second_str_helper[129];
+        for (int i = 0; i < 128; ++i) {
+            first_str_helper[i] = '0';
+            second_str_helper[i] = '0';
+        }
+        int did_find_delimiter = 0;
+        int i = 0;
+        while (!did_find_delimiter || buffer[i] != '\0') {
+            if (buffer[i] == '\n') {
+                did_find_delimiter = 1;
+                i++;
+                continue;
+            }
+            if (did_find_delimiter) {
+                second_str_helper[buffer[i]] = '1';
+            } else {
+                first_str_helper[buffer[i]] = '1';
+            }
+            i++;
+        }
+        char helpers[257];
+        sprintf(helpers, "%s%s", first_str_helper, second_str_helper);
+        int fd_2_write = open("fifo_2", O_WRONLY);
+        check = write(fd_2_write, helpers, strlen(helpers) + 1);
+        close(fd_2_write);
+        if (check < 0) {
+            printf("Failed to write string to fifo 2\n");
+            return 0;
+        }
+    }
+    wait(NULL);
+    unlink("fifo_1");
+    unlink("fifo_2");
     return 0;
 }
